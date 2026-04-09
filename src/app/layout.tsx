@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   title: "Layer One IT Consultants",
   description: "Solutions for the modern world",
   metadataBase: new URL(
-    process.env.VERCEL_URL 
+    process.env.VERCEL_URL
       ? `https://${process.env.VERCEL_URL}`
       : process.env.NEXT_PUBLIC_SITE_URL || "https://layeroneconsultants.com"
   ),
@@ -41,6 +41,9 @@ export const metadata: Metadata = {
         alt: "Layer One IT Consultants",
       },
     ],
+  },
+  verification: {
+    google: "538459a7aedf6cef",
   },
 };
 
