@@ -17,6 +17,8 @@ export default function Nav() {
   const [isOpen, setIsOpen] = useState(false);
   const [threeLoaded, setThreeLoaded] = useState(false);
   const [vantaLoaded, setVantaLoaded] = useState(false);
+  // Only fetch three.js + Vanta (~600KB) once the menu is first opened
+  const [loadVanta, setLoadVanta] = useState(false);
   const vantaRef = useRef<HTMLDivElement>(null);
   const vantaEffect = useRef<any>(null);
   const pathname = usePathname();
@@ -56,6 +58,10 @@ export default function Nav() {
     };
   }, [threeLoaded, vantaLoaded, isOpen]);
 
+  useEffect(() => {
+    if (isOpen) setLoadVanta(true);
+  }, [isOpen]);
+
   // Close sidebar when route changes
   useEffect(() => {
     setIsOpen(false);
@@ -63,14 +69,18 @@ export default function Nav() {
 
   return (
     <>
-      <Script 
-        src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js" 
-        onLoad={() => setThreeLoaded(true)}
-      />
-      <Script 
-        src="https://cdn.jsdelivr.net/npm/vanta@latest/dist/vanta.dots.min.js" 
-        onLoad={() => setVantaLoaded(true)}
-      />
+      {loadVanta && (
+        <>
+          <Script 
+            src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js" 
+            onLoad={() => setThreeLoaded(true)}
+          />
+          <Script 
+            src="https://cdn.jsdelivr.net/npm/vanta@latest/dist/vanta.dots.min.js" 
+            onLoad={() => setVantaLoaded(true)}
+          />
+        </>
+      )}
 
        {/* Contact information - centered at top */}
        <div className="fixed top-0 w-full z-40 flex justify-center pt-2 px-4 bg-opacity-70 backdrop-blur-sm">

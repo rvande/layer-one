@@ -7,6 +7,7 @@ import Terminal from './Terminal';
 import { animate, createScope } from 'animejs';
 import { useEffect, useRef, useState } from 'react';
 import ScrollArrow from './ScrollArrow';
+import FeaturedMedia from './FeaturedMedia';
 
 export default function Hero() {
   const root = useRef(null);
@@ -14,10 +15,10 @@ export default function Hero() {
   const logoRef = useRef(null);
   const partnersRef = useRef(null);
   const [showTagline, setShowTagline] = useState(false);
-  const [showComingSoon, setShowComingSoon] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const [hasAnimated, setHasAnimated] = useState(false);
   const [showScrollArrows, setShowScrollArrows] = useState(false);
+  const [showMedia, setShowMedia] = useState(false);
 
 
   useEffect(() => {
@@ -31,16 +32,23 @@ export default function Hero() {
       (path as SVGPathElement).style.strokeDasharray = 'none';
       (path as SVGPathElement).style.strokeDashoffset = '0';
     });
-    
+
+    // Local (not state) so timers/observer callbacks never see a stale value,
+    // and every timer is tracked so cleanup can cancel it.
+    let started = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const later = (fn: () => void, ms: number) => { timers.push(setTimeout(fn, ms)); };
+
     // Create animation scope
     scope.current = createScope({ root }).add(scope => {
       const animateLogo = () => {
-        if (hasAnimated) return; // Prevent re-animation
-        setHasAnimated(true); // Mark as animated
-        
+        if (started) return; // Prevent re-animation
+        started = true;
+        setHasAnimated(true);
+
         // Select all path elements in the SVG
         const paths = document.querySelectorAll('.hero-logo path');
-        
+
         // Set initial state without causing dashes
         paths.forEach((path) => {
           (path as SVGPathElement).style.fillOpacity = '0';
@@ -52,9 +60,12 @@ export default function Hero() {
 
         // Calculate total animation duration for all paths
         const pathCount = paths.length;
-        const delayPerPath = 100;
-        const strokeDuration = 1200;
-        const fillDelay = 500;
+        // Much tighter timings on mobile so content appears fast
+        const fast = window.innerWidth < 768;
+        const delayPerPath = fast ? 20 : 70;
+        const strokeDuration = fast ? 350 : 800;
+        const fillDelay = fast ? 100 : 300;
+        const fillDuration = fast ? 300 : 600;
         const totalDuration = (pathCount - 1) * delayPerPath + strokeDuration + fillDelay;
 
         // Animate each path
@@ -70,36 +81,35 @@ export default function Hero() {
           // Fill animation
           animate(path, {
             fillOpacity: [0, 1],
-            duration: 800,
+            duration: fillDuration,
             delay: index * delayPerPath + fillDelay,
             easing: 'easeInOutQuad'
           });
         });
 
-        // Show elements with reduced delays
-        setTimeout(() => setShowTagline(true), totalDuration + 50);
-        setTimeout(() => setShowComingSoon(true), totalDuration + 800);
-        setTimeout(() => setShowTerminal(true), totalDuration + 1600);
-        setTimeout(() => setShowScrollArrows(true), totalDuration + 2200);
+        // Stagger the rest in after the logo
+        later(() => setShowTagline(true), totalDuration + 50);
+        later(() => setShowMedia(true), totalDuration + (fast ? 50 : 300));
+        later(() => setShowTerminal(true), totalDuration + (fast ? 100 : 500));
+        later(() => setShowScrollArrows(true), totalDuration + (fast ? 200 : 800));
       };
 
-      // Initial state - make sure partners section is visible on mobile
-      setTimeout(() => {
-        if (!hasAnimated) {
-          // If animation hasn't run yet (e.g., not in viewport), show elements anyway
-          setShowTagline(true);
-          setShowComingSoon(true);
-          setShowTerminal(true);
-          setShowScrollArrows(true);
-          setHasAnimated(true);
-        }
-      }, 5000); // Fallback timeout of 5 seconds
+      // Fallback: if the logo never intersects (e.g. loaded scrolled down), show everything
+      later(() => {
+        if (started) return;
+        started = true;
+        setShowTagline(true);
+        setShowTerminal(true);
+        setShowScrollArrows(true);
+        setShowMedia(true);
+        setHasAnimated(true);
+      }, 1500);
 
       // Create intersection observer for logo only
       const logoObserver = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
-            if (entry.isIntersecting && !hasAnimated) {
+            if (entry.isIntersecting) {
               animateLogo();
               logoObserver.disconnect(); // Only animate once
             }
@@ -119,13 +129,14 @@ export default function Hero() {
       });
     });
 
-    // Cleanup animations on unmount
+    // Cleanup animations and pending timers on unmount
     return () => {
+      timers.forEach(clearTimeout);
       if (scope.current) {
         scope.current.revert();
       }
     };
-  }, [hasAnimated]); // Add hasAnimated to dependency array
+  }, []);
 
   return (
     <div ref={root}>
@@ -135,6 +146,13 @@ export default function Hero() {
           <DotNetworkBackground />
         </div>
         
+        {/* Readability scrim: cheap radial dim behind content (no backdrop-filter, so no GPU cost over the WebGL bg) */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 z-[5] pointer-events-none"
+          style={{ background: 'radial-gradient(ellipse 70% 60% at 50% 40%, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.25) 60%, rgba(0,0,0,0) 100%)' }}
+        />
+
         {/* Main content container with flexbox */}
         <div className="relative z-10 flex flex-col items-center min-h-screen px-4 sm:px-6 lg:px-8 pt-5 sm:pt-16">
           {/* Content wrapper with max-width */}
@@ -176,40 +194,37 @@ export default function Hero() {
               </div>
 
               {showTagline && (
-                <p className="text-white/80 text-lg sm:text-xl md:text-2xl lg:text-2xl text-center font-light tracking-wider mb-6 sm:mb-8 screen-flicker">
+                <p className="text-white/90 rounded-lg bg-black/50 md:bg-black/30 md:backdrop-blur-md px-4 py-2 [text-shadow:0_1px_8px_rgba(0,0,0,0.8)] text-lg sm:text-xl md:text-2xl lg:text-2xl text-center font-light tracking-wider mb-6 sm:mb-8 screen-flicker">
                   TECH SOLUTIONS FOR THE MODERN WORLD
                 </p>
               )}
             
-              {/* Coming Soon section with flickering effect */}
-              {showComingSoon && (
-                <div className="text-center mb-6 sm:mb-8">
-                  <h1 className="relative inline-block text-4xl sm:text-5xl md:text-5xl lg:text-4xl font-bold font-[orbitron] tracking-wider screen-flicker">
-                    <span className='hidden'>Layer One IT Consultants</span>
-                    <span className="glitch-text" data-text="COMING SOON">COMING SOON</span>
-                  </h1>
-                </div>
-              )}
+              <h1 className="sr-only">Layer One IT Consultants</h1>
 
               {/* Terminal component - reduced height container */}
               <div className="w-full h-[150px] sm:h-[180px] relative mb-2 sm:mb-4">
-                <div className={`w-full h-[100px] sm:h-[150px] md:h-[180px] rounded-md overflow-hidden text-center transition-opacity duration-1000 ${showTerminal ? 'opacity-100' : 'opacity-0'}`}>
+                <div className={`w-full max-w-xl mx-auto h-[100px] sm:h-[150px] md:h-[180px] rounded-md overflow-hidden text-center bg-black/60 md:bg-black/30 md:backdrop-blur-md transition-opacity duration-500 ${showTerminal ? 'opacity-100' : 'opacity-0'}`}>
                   <Terminal />
                 </div>
               </div>
               
               {/* Scroll indicator arrows */}
-              <div className={`w-full flex justify-center mb-4 transition-opacity duration-1000 ${showScrollArrows ? 'opacity-100' : 'opacity-0'}`}>
+              <div className={`w-full flex justify-center mb-4 transition-opacity duration-500 ${showScrollArrows ? 'opacity-100' : 'opacity-0'}`}>
                 <ScrollArrow />
               </div>
             </div>
+          </div>
+
+          {/* Featured media */}
+          <div className={`w-full pb-4 transition-opacity duration-500 ${showMedia ? 'opacity-100' : 'opacity-0'}`} {...(showMedia ? {} : { inert: true })}>
+            <FeaturedMedia />
           </div>
         </div>
 
         {/* Partners Section - ensure it's always visible once loaded */}
         <div 
           ref={partnersRef}
-          className={`w-full relative z-20 mt-10 py-12 bg-black/40 overflow-visible transition-opacity duration-1000 ${hasAnimated ? 'opacity-100' : 'opacity-0'}`}
+          className={`w-full relative z-20 mt-10 py-12 bg-black/40 md:backdrop-blur-md overflow-visible transition-opacity duration-1000 ${hasAnimated ? 'opacity-100' : 'opacity-0'}`}
           style={{position: 'relative', willChange: 'transform'}}
         >
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

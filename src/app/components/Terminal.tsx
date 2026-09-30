@@ -90,7 +90,7 @@ const Terminal = () => {
     }, []);
 
     return (
-        <div className="font-mono text-base leading-relaxed tracking-wide p-6 pb-2 rounded-lg">
+        <div className="font-mono text-xs sm:text-sm md:text-base leading-relaxed tracking-normal sm:tracking-wide p-3 sm:p-6 pb-2 rounded-lg break-words">
             {lines.map((line, i) => {
                 // Add safety check for line
                 if (!line) return null;

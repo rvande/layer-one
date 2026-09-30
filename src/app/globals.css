@@ -264,6 +264,12 @@ svg path {
   position: relative;
 }
 
+@media (max-width: 767px) {
+  .screen-flicker {
+    animation-duration: 1s;
+  }
+}
+
 .screen-flicker::before {
   content: "";
   position: absolute;
@@ -333,4 +339,25 @@ svg path {
 
 .animate-glitch {
   animation: glitch-effect 0.2s infinite;
+}
+
+/* 3D background: fixed to the LARGEST mobile viewport so it never resizes or shifts
+   when the browser address bar shows/hides. Height falls back to 100% where lvh is unsupported. */
+.webgl-bg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  height: 100lvh;
+}
+
+/* Decorative glows/lines are absolutely positioned past the edges on small screens;
+   clip them so the page can't be scrolled sideways. `hidden` first as a fallback for
+   browsers without `clip`. */
+html,
+body {
+  overflow-x: hidden;
+  overflow-x: clip;
+  max-width: 100%;
 }

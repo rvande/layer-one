@@ -3,356 +3,480 @@
 import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 
+type HardwareTier = 'low' | 'medium' | 'high';
+
+const isCoarsePointer = (): boolean =>
+  window.matchMedia?.('(pointer: coarse)').matches ?? false;
+
+// Phones are NOT automatically "low": modern phones are fast, and the real
+// bottleneck here is fill rate, which adaptive resolution handles at runtime.
+// Only genuinely weak hardware lands on the low tier.
+const detectHardwareTier = (): HardwareTier => {
+  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  const cores = navigator.hardwareConcurrency;
+  const isTouchOrSmall = window.innerWidth < 768 || isCoarsePointer();
+
+  if ((memory !== undefined && memory < 4) || (cores !== undefined && cores <= 2)) {
+    return 'low';
+  } else if (isTouchOrSmall || (memory !== undefined && memory < 8) || (cores !== undefined && cores <= 4)) {
+    return 'medium';
+  }
+  return 'high';
+};
+
+const TIER_CONFIG = {
+  low: {
+    gridSize: 24,
+    sphereDetail: 4,
+    antialias: false,
+    maxPixelRatio: 1.5,
+    animSpeed: 0.05,
+    cameraSpeed: 0.0003,
+    spikeProb: 0.15,
+    dropProb: 0.25,
+    mouseEnabled: false,
+    maxFps: 30,
+    powerPreference: 'low-power' as WebGLPowerPreference,
+  },
+  medium: {
+    gridSize: 32,
+    sphereDetail: 6,
+    antialias: true,
+    maxPixelRatio: 2,
+    animSpeed: 0.08,
+    cameraSpeed: 0.0006,
+    spikeProb: 0.3,
+    dropProb: 0.5,
+    mouseEnabled: true,
+    maxFps: 60,
+    powerPreference: 'default' as WebGLPowerPreference,
+  },
+  high: {
+    gridSize: 40,
+    sphereDetail: 8,
+    antialias: true,
+    maxPixelRatio: 2,
+    animSpeed: 0.12,
+    cameraSpeed: 0.001,
+    spikeProb: 0.5,
+    dropProb: 0.9,
+    mouseEnabled: true,
+    maxFps: 60,
+    powerPreference: 'high-performance' as WebGLPowerPreference,
+  },
+};
+
+// Adaptive resolution: start at the sharpest ratio the tier allows and only step
+// down if the device *demonstrably* can't keep up with its own fps target.
+const SLOW_FACTOR = 1.6;     // avg frame time > target * this counts as slow
+const ADAPT_WINDOW = 60;     // frames per measurement window
+const WARMUP_FRAMES = 120;   // ignore startup hitches (hydration, asset loads)
+const SLOW_WINDOWS_TO_STEP = 2; // consecutive slow windows before stepping down
+const PIXEL_RATIO_STEP = 0.85;
+const MIN_PIXEL_RATIO = 1;   // never go below native CSS pixels — avoids visible pixelation
+
+// Base animation constants were tuned at 60fps; dt is normalised to that.
+const REF_FRAME_MS = 1000 / 60;
+
+// Global playback speed. 1 = speeds as written in TIER_CONFIG at 60fps.
+const TIME_SCALE = 0.5;
+
+// Vertex colours aren't colour-managed, so convert sRGB hex -> linear ourselves
+// (matches what a material `color` would do).
+const LINE_COLOR = new THREE.Color(0xeb6a1e);
+const LINE_R = LINE_COLOR.r;
+const LINE_G = LINE_COLOR.g;
+const LINE_B = LINE_COLOR.b;
+
 const DotNetworkBackground = () => {
-  const containerRef = useRef(null);
-  const rendererRef = useRef(null);
-  const sceneRef = useRef(null);
-  const cameraRef = useRef(null);
-  const dotsRef = useRef([]);
-  const linesRef = useRef([]);
-  const mouseRef = useRef(new THREE.Vector2(0, 0));
-  const timeRef = useRef(0);
-  const cameraAngleRef = useRef(0);
-  const spikingDotsRef = useRef(new Set());
-  const droppingDotsRef = useRef(new Set());
-  const isMobileRef = useRef(false);
-  const animationSpeedRef = useRef(0.12);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    // Check if mobile/small screen
-    const checkMobile = () => {
-      isMobileRef.current = window.innerWidth < 768;
-      // Slower animation speed for mobile
-      animationSpeedRef.current = isMobileRef.current ? 0.06 : 0.12;
-    };
-    
-    // Initial check
-    checkMobile();
-    
-    // Add resize listener
-    window.addEventListener('resize', checkMobile);
+    const tier = detectHardwareTier();
+    const config = TIER_CONFIG[tier];
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    const { gridSize } = config;
+    const mouseEnabled = config.mouseEnabled && !isCoarsePointer();
+    const spacing = 4;
 
-    // Initialize scene
+    // Renderer — bail out gracefully if WebGL is unavailable (black bg remains)
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: config.antialias,
+        alpha: true,
+        powerPreference: config.powerPreference,
+        stencil: false,
+        depth: false, // no depth testing needed: dots are tiny, lines additive
+      });
+    } catch {
+      return;
+    }
+
+    let pixelRatio = Math.min(window.devicePixelRatio || 1, config.maxPixelRatio);
+    // Size from the container (100lvh = largest viewport), NOT window.innerHeight:
+    // mobile address-bar show/hide changes innerHeight and would shift/re-size the scene.
+    let width = container.clientWidth || window.innerWidth;
+    let height = container.clientHeight || window.innerHeight;
+    renderer.setPixelRatio(pixelRatio);
+    renderer.setSize(width, height);
+    container.appendChild(renderer.domElement);
+
     const scene = new THREE.Scene();
-    sceneRef.current = scene;
     scene.background = new THREE.Color(0x000000);
 
-    // Initialize camera with perspective view
-    const camera = new THREE.PerspectiveCamera(
-      60,
-      window.innerWidth / window.innerHeight,
-      0.7,
-      1200
-    );
-    cameraRef.current = camera;
+    const camera = new THREE.PerspectiveCamera(60, width / height, 0.7, 1200);
     camera.position.set(0, 10, 40);
-    camera.rotation.x = -Math.PI / 6;
 
-    // Initialize renderer
-    const renderer = new THREE.WebGLRenderer({ 
-      antialias: true,
-      alpha: true
-    });
-    rendererRef.current = renderer;
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    containerRef.current.appendChild(renderer.domElement);
+    // ── Dots: one InstancedMesh, positions written directly into the buffer ──
+    const dotCount = gridSize * gridSize;
+    const dotGeometry = new THREE.SphereGeometry(0.08, config.sphereDetail, config.sphereDetail);
+    const dotMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 });
+    const instancedMesh = new THREE.InstancedMesh(dotGeometry, dotMaterial, dotCount);
+    instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    instancedMesh.frustumCulled = false; // instances move; bounding sphere is stale
+    scene.add(instancedMesh);
+    const matrixArray = instancedMesh.instanceMatrix.array as Float32Array;
 
-    // Create grid of dots
-    const gridSize = 40;
-    const spacing = 4;
-    const dots = [];
-    const dotGeometry = new THREE.SphereGeometry(0.08, 8, 8);
-    const dotMaterial = new THREE.MeshBasicMaterial({ 
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.4
-    });
+    // Struct-of-arrays: cache-friendly, no per-dot objects
+    const dotX = new Float32Array(dotCount);
+    const dotZ = new Float32Array(dotCount);
+    const dotY = new Float32Array(dotCount);
+    const dotDepth = new Float32Array(dotCount);
+    const dotPhase = new Float32Array(dotCount);
+    const dotAmp = new Float32Array(dotCount);
+    const dotFreq = new Float32Array(dotCount);
+    const spikeHeight = new Float32Array(dotCount);
+    const dropDepth = new Float32Array(dotCount);
+    // progress: 0 = idle; (0,1] = active
+    const spikeProg = new Float32Array(dotCount);
+    const dropProg = new Float32Array(dotCount);
+    const spiking = new Uint8Array(dotCount);
+    const dropping = new Uint8Array(dotCount);
 
-    // Create dots in a grid pattern
     for (let z = 0; z < gridSize; z++) {
       for (let x = 0; x < gridSize; x++) {
-        const dot = new THREE.Mesh(dotGeometry, dotMaterial);
-        
-        const xPos = (x - gridSize/2) * spacing;
-        const zPos = (z - gridSize/2) * spacing;
-        const yPos = 0;
-        
-        dot.position.set(xPos, yPos, zPos);
-        
-        const distanceScale = 1 - (z / gridSize) * 0.5;
-        dot.scale.set(distanceScale, distanceScale, distanceScale);
-        
-        dot.userData = {
-          originalPosition: dot.position.clone(),
-          phaseOffset: Math.random() * Math.PI * 2,
-          amplitude: 0.15 + Math.random() * 0.1,
-          frequency: 0.3 + Math.random() * 0.2,
-          depth: z / gridSize,
-          spiking: true,
-          dropping: true,
-          spikeProgress: 0,
-          dropProgress: 0,
-          spikeHeight: 3 + Math.random() * 2,
-          dropDepth: -(3 + Math.random())
-        };
-        scene.add(dot);
-        dots.push(dot);
+        const i = z * gridSize + x;
+        const xPos = (x - gridSize / 2) * spacing;
+        const zPos = (z - gridSize / 2) * spacing;
+        const s = 1 - (z / gridSize) * 0.5;
+
+        dotX[i] = xPos;
+        dotZ[i] = zPos;
+        dotDepth[i] = z / gridSize;
+        dotPhase[i] = Math.random() * Math.PI * 2;
+        dotAmp[i] = 0.15 + Math.random() * 0.1;
+        dotFreq[i] = 0.3 + Math.random() * 0.2;
+        spikeHeight[i] = 3 + Math.random() * 2;
+        dropDepth[i] = -(3 + Math.random());
+
+        // Column-major 4x4: uniform scale + translation. Only [13] (y) changes per frame.
+        const o = i * 16;
+        matrixArray[o] = s;
+        matrixArray[o + 5] = s;
+        matrixArray[o + 10] = s;
+        matrixArray[o + 12] = xPos;
+        matrixArray[o + 13] = 0;
+        matrixArray[o + 14] = zPos;
+        matrixArray[o + 15] = 1;
       }
     }
-    dotsRef.current = dots;
+    instancedMesh.instanceMatrix.needsUpdate = true;
 
-    // Create lines with enhanced visibility
-    const lineMaterial = new THREE.LineBasicMaterial({ 
-      color: 0xeb6a1e,
+    // ── Lines: ONE LineSegments draw call, per-vertex colour for fade ──
+    const neighborOffsets: [number, number][] = [[1, 0], [0, 1], [1, 1], [-1, 1]];
+    const pairA: number[] = [];
+    const pairB: number[] = [];
+    for (let i = 0; i < dotCount; i++) {
+      const z = (i / gridSize) | 0;
+      const x = i % gridSize;
+      for (const [dx, dz] of neighborOffsets) {
+        const nx = x + dx;
+        const nz = z + dz;
+        if (nx >= 0 && nx < gridSize && nz < gridSize) {
+          pairA.push(i);
+          pairB.push(nz * gridSize + nx);
+        }
+      }
+    }
+    const segCount = pairA.length;
+    const lineA = Uint16Array.from(pairA);
+    const lineB = Uint16Array.from(pairB);
+    const connectDistance = spacing * 2;
+    const lineMaxDist = new Float32Array(segCount);
+    const lineMaxDistSq = new Float32Array(segCount);
+    const lineFade = new Float32Array(segCount); // (1 - depth*0.5) * 0.8
+    for (let k = 0; k < segCount; k++) {
+      const depth = dotDepth[lineA[k]];
+      lineMaxDist[k] = connectDistance * (1 - depth * 0.3);
+      lineMaxDistSq[k] = lineMaxDist[k] * lineMaxDist[k];
+      lineFade[k] = (1 - depth * 0.5) * 0.8;
+    }
+
+    const linePositions = new Float32Array(segCount * 6);
+    const lineColors = new Float32Array(segCount * 6);
+    const lineGeometry = new THREE.BufferGeometry();
+    const posAttr = new THREE.BufferAttribute(linePositions, 3).setUsage(THREE.DynamicDrawUsage);
+    const colAttr = new THREE.BufferAttribute(lineColors, 3).setUsage(THREE.DynamicDrawUsage);
+    lineGeometry.setAttribute('position', posAttr);
+    lineGeometry.setAttribute('color', colAttr);
+    lineGeometry.setDrawRange(0, 0);
+    // Additive blending: scaling colour toward black == lowering opacity
+    const lineMaterial = new THREE.LineBasicMaterial({
+      vertexColors: true,
       transparent: true,
       opacity: 0.9,
       blending: THREE.AdditiveBlending,
-      linewidth: 1.5
+      depthWrite: false,
     });
+    const lineSegments = new THREE.LineSegments(lineGeometry, lineMaterial);
+    lineSegments.frustumCulled = false;
+    scene.add(lineSegments);
 
-    const lines = [];
-    const connectDistance = spacing * 2;
-    
-    for (let i = 0; i < dots.length; i++) {
-      const z = Math.floor(i / gridSize);
-      const x = i % gridSize;
-      
-      const neighbors = [
-        [x+1, z],
-        [x, z+1],
-        [x+1, z+1],
-        [x-1, z+1]
-      ];
-      
-      for (const [nx, nz] of neighbors) {
-        if (nx >= 0 && nx < gridSize && nz >= 0 && nz < gridSize) {
-          const neighborIndex = nz * gridSize + nx;
-          
-          const lineGeometry = new THREE.BufferGeometry();
-          const vertices = new Float32Array(6);
-          lineGeometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-          const line = new THREE.Line(lineGeometry, lineMaterial);
-          scene.add(line);
-          lines.push({
-            line,
-            pointA: i,
-            pointB: neighborIndex,
-            depth: z / gridSize
-          });
+    // ── Cached objects ──
+    const lookAtTarget = new THREE.Vector3(0, 0, 0);
+    const raycaster = new THREE.Raycaster();
+    const mousePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const mouseIntersection = new THREE.Vector3();
+    const mouse = new THREE.Vector2(0, 0);
+    let mouseActive = false;
+
+    const pickIdle = (): number => {
+      // Bounded random probing — no per-call array allocation
+      for (let t = 0; t < 6; t++) {
+        const i = (Math.random() * dotCount) | 0;
+        if (!spiking[i] && !dropping[i]) return i;
+      }
+      return -1;
+    };
+    const triggerSpike = (i: number) => { spiking[i] = 1; spikeProg[i] = 0; };
+    const triggerDrop = (i: number) => { dropping[i] = 1; dropProg[i] = 0; };
+
+    // ── Loop state ──
+    let rafId = 0;
+    let running = false;
+    let lastFrame = 0;
+    let animTime = 0;
+    let cameraAngle = 0;
+    let slowAccum = 0;
+    let slowFrames = 0;
+    const minInterval = 1000 / config.maxFps - 2; // slack for vsync jitter
+
+    const step = (dtScale: number) => {
+      animTime += config.animSpeed * dtScale;
+
+      cameraAngle += config.cameraSpeed * dtScale;
+      camera.position.set(Math.sin(cameraAngle) * 40, 10, Math.cos(cameraAngle) * 40);
+      camera.lookAt(lookAtTarget);
+
+      if (Math.random() < config.spikeProb * dtScale) { const i = pickIdle(); if (i >= 0) triggerSpike(i); }
+      if (Math.random() < config.dropProb * dtScale) { const i = pickIdle(); if (i >= 0) triggerDrop(i); }
+
+      let hasMouse = false;
+      if (mouseEnabled && mouseActive) {
+        camera.updateMatrixWorld();
+        raycaster.setFromCamera(mouse, camera);
+        hasMouse = raycaster.ray.intersectPlane(mousePlane, mouseIntersection) !== null;
+      }
+      const mx = mouseIntersection.x;
+      const my = mouseIntersection.y;
+      const mz = mouseIntersection.z;
+      const progStep = 0.015 * dtScale;
+
+      for (let i = 0; i < dotCount; i++) {
+        const depth = dotDepth[i];
+        let y = Math.sin(animTime * dotFreq[i] + dotPhase[i]) * dotAmp[i] * (1 - depth * 0.5);
+
+        if (spiking[i]) {
+          const p = (spikeProg[i] += progStep);
+          if (p >= 1) spiking[i] = 0;
+          y += Math.sin(p * Math.PI) * spikeHeight[i];
         }
-      }
-    }
-    linesRef.current = lines;
-
-    // Mouse movement handler
-    const onMouseMove = (event) => {
-      const rect = containerRef.current.getBoundingClientRect();
-      mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-      mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    };
-
-    // Window resize handler
-    const onWindowResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    };
-
-    // Random animations
-    const triggerRandomSpike = () => {
-      const availableDots = dotsRef.current.filter(dot => !dot.userData.spiking && !dot.userData.dropping);
-      if (availableDots.length > 0) {
-        const randomDot = availableDots[Math.floor(Math.random() * availableDots.length)];
-        randomDot.userData.spiking = true;
-        randomDot.userData.spikeProgress = 0;
-        spikingDotsRef.current.add(randomDot);
-      }
-    };
-
-    const triggerRandomDrop = () => {
-      const availableDots = dotsRef.current.filter(dot => !dot.userData.spiking && !dot.userData.dropping);
-      if (availableDots.length > 0) {
-        const randomDot = availableDots[Math.floor(Math.random() * availableDots.length)];
-        randomDot.userData.dropping = true;
-        randomDot.userData.dropProgress = 0;
-        droppingDotsRef.current.add(randomDot);
-      }
-    };
-
-    // Animation function
-    const animate = () => {
-      requestAnimationFrame(animate);
-      // Use dynamic speed based on device type
-      timeRef.current += animationSpeedRef.current;
-    
-      // Add camera rotation - slower on mobile
-      cameraAngleRef.current += isMobileRef.current ? 0.0005 : 0.001; // Adjust speed here
-      const radius = 40; // Match this to your initial camera distance
-      const height = 10; // Match this to your initial camera height
-      
-      if (cameraRef.current) {
-        cameraRef.current.position.x = Math.sin(cameraAngleRef.current) * radius;
-        cameraRef.current.position.z = Math.cos(cameraAngleRef.current) * radius;
-        cameraRef.current.position.y = height;
-        
-        // Make camera look at center
-        cameraRef.current.lookAt(new THREE.Vector3(0, 0, 0));
-      }
-      // Trigger random animations - less frequent on mobile
-      if (Math.random() < (isMobileRef.current ? 0.25 : 0.5)) triggerRandomSpike();
-      if (Math.random() < (isMobileRef.current ? 0.45 : 0.9)) triggerRandomDrop();
-
-      // Update dots
-      dotsRef.current.forEach((dot) => {
-        const { 
-          originalPosition, 
-          phaseOffset, 
-          amplitude, 
-          frequency, 
-          depth, 
-          spiking,
-          dropping,
-          spikeHeight,
-          dropDepth
-        } = dot.userData;
-        
-        // Base wave motion
-        const wave = Math.sin(timeRef.current * frequency + phaseOffset) * amplitude * (1 - depth * 0.5);
-        let finalY = originalPosition.y + wave;
-        
-        // Handle spiking animation - slower on mobile
-        if (spiking) {
-          // Use half the speed on mobile
-          const spikeSpeed = isMobileRef.current ? 0.008 : 0.015;
-          dot.userData.spikeProgress += spikeSpeed;
-          if (dot.userData.spikeProgress >= 1) {
-            dot.userData.spiking = false;
-            spikingDotsRef.current.delete(dot);
-          }
-          const spikeCurve = Math.sin(dot.userData.spikeProgress * Math.PI) * spikeHeight;
-          finalY += spikeCurve;
+        if (dropping[i]) {
+          const p = (dropProg[i] += progStep);
+          if (p >= 1) dropping[i] = 0;
+          y += Math.sin(p * Math.PI) * dropDepth[i];
         }
 
-        // Handle dropping animation - slower on mobile
-        if (dropping) {
-          // Use half the speed on mobile
-          const dropSpeed = isMobileRef.current ? 0.008 : 0.015;
-          dot.userData.dropProgress += dropSpeed;
-          if (dot.userData.dropProgress >= 1) {
-            dot.userData.dropping = false;
-            droppingDotsRef.current.delete(dot);
-          }
-          const dropCurve = Math.sin(dot.userData.dropProgress * Math.PI) * dropDepth;
-          finalY += dropCurve;
-        }
+        dotY[i] = y;
 
-        dot.position.y = finalY;
-        
-        // Mouse interaction
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(mouseRef.current, camera);
-        const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-        const intersection = new THREE.Vector3();
-        raycaster.ray.intersectPlane(plane, intersection);
-        
-        const distanceToMouse = intersection.distanceTo(dot.position);
-        // Smaller influence radius on mobile
-        const baseInfluenceRadius = isMobileRef.current ? 3 : 5;
-        const influenceRadius = baseInfluenceRadius * (1 - depth * 0.5);
-        
-        if (distanceToMouse < influenceRadius) {
-          // Instead of just moving the dot up, trigger spike or drop
-          if (!dot.userData.spiking && !dot.userData.dropping) {
-            const normalizedDistance = distanceToMouse / influenceRadius;
-            
-            if (normalizedDistance < 0.5) {
-              dot.userData.spiking = true;
-              dot.userData.spikeProgress = 0;
-              spikingDotsRef.current.add(dot);
-            } else {
-              dot.userData.dropping = true;
-              dot.userData.dropProgress = 0;
-              droppingDotsRef.current.add(dot);
-            }
+        if (hasMouse && !spiking[i] && !dropping[i]) {
+          const dx = dotX[i] - mx;
+          const dy = y - my;
+          const dz = dotZ[i] - mz;
+          const distSq = dx * dx + dy * dy + dz * dz;
+          const radius = 5 * (1 - depth * 0.5);
+          if (distSq < radius * radius) {
+            // dist/radius < 0.5  <=>  distSq < (radius/2)^2
+            if (distSq < radius * radius * 0.25) triggerSpike(i); else triggerDrop(i);
           }
         }
-      });
 
-      // Update lines
-      linesRef.current.forEach((connection) => {
-        const pointA = dotsRef.current[connection.pointA].position;
-        const pointB = dotsRef.current[connection.pointB].position;
-        
-        const distance = pointA.distanceTo(pointB);
-        const maxDistance = connectDistance * (1 - connection.depth * 0.3);
-        
-        if (distance < maxDistance) {
-          const opacity = (1 - (distance / maxDistance)) * (1 - connection.depth * 0.5);
-          connection.line.material.opacity = opacity * 0.8;
-          connection.line.visible = true;
-          
-          const positions = connection.line.geometry.attributes.position.array;
-          positions[0] = pointA.x;
-          positions[1] = pointA.y;
-          positions[2] = pointA.z;
-          positions[3] = pointB.x;
-          positions[4] = pointB.y;
-          positions[5] = pointB.z;
-          connection.line.geometry.attributes.position.needsUpdate = true;
-        } else {
-          connection.line.visible = false;
-        }
-      });
+        matrixArray[i * 16 + 13] = y;
+      }
+      instancedMesh.instanceMatrix.needsUpdate = true;
 
+      // Compact visible segments into the front of the buffers
+      let v = 0;
+      for (let k = 0; k < segCount; k++) {
+        const a = lineA[k];
+        const b = lineB[k];
+        const ax = dotX[a], ay = dotY[a], az = dotZ[a];
+        const bx = dotX[b], by = dotY[b], bz = dotZ[b];
+        const dx = ax - bx, dy = ay - by, dz = az - bz;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        if (distSq >= lineMaxDistSq[k]) continue;
+
+        const dist = Math.sqrt(distSq);
+        const alpha = (1 - dist / lineMaxDist[k]) * lineFade[k];
+        const r = LINE_R * alpha, g = LINE_G * alpha, bl = LINE_B * alpha;
+        const o = v * 6;
+        linePositions[o] = ax; linePositions[o + 1] = ay; linePositions[o + 2] = az;
+        linePositions[o + 3] = bx; linePositions[o + 4] = by; linePositions[o + 5] = bz;
+        lineColors[o] = r; lineColors[o + 1] = g; lineColors[o + 2] = bl;
+        lineColors[o + 3] = r; lineColors[o + 4] = g; lineColors[o + 5] = bl;
+        v++;
+      }
+      posAttr.needsUpdate = true;
+      colAttr.needsUpdate = true;
+      lineGeometry.setDrawRange(0, v * 2);
+    };
+
+    const slowThreshold = (1000 / config.maxFps) * SLOW_FACTOR;
+    let warmup = WARMUP_FRAMES;
+    let slowWindows = 0;
+
+    const adaptResolution = (frameMs: number) => {
+      if (warmup > 0) { warmup--; return; }
+      if (frameMs >= 100) return; // hitch / tab switch, not sustained slowness
+      slowAccum += frameMs;
+      if (++slowFrames < ADAPT_WINDOW) return;
+      const avg = slowAccum / slowFrames;
+      slowAccum = 0;
+      slowFrames = 0;
+      slowWindows = avg > slowThreshold ? slowWindows + 1 : 0;
+      // Only ever scale down — avoids oscillation
+      if (slowWindows >= SLOW_WINDOWS_TO_STEP && pixelRatio > MIN_PIXEL_RATIO) {
+        slowWindows = 0;
+        pixelRatio = Math.max(MIN_PIXEL_RATIO, pixelRatio * PIXEL_RATIO_STEP);
+        renderer.setPixelRatio(pixelRatio);
+        renderer.setSize(width, height);
+      }
+    };
+
+    const frame = (now: number) => {
+      if (!running) return;
+      rafId = requestAnimationFrame(frame);
+
+      const elapsed = now - lastFrame;
+      if (elapsed < minInterval) return; // cap fps (e.g. 120Hz displays, low tier 30fps)
+      lastFrame = now;
+
+      const clamped = Math.min(elapsed, 100); // tab-switch / hitch guard
+      step((clamped / REF_FRAME_MS) * TIME_SCALE);
       renderer.render(scene, camera);
+      adaptResolution(clamped);
     };
 
-    // Add event listeners
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('resize', onWindowResize);
+    const start = () => {
+      if (running || reducedMotion) return;
+      running = true;
+      lastFrame = performance.now();
+      slowAccum = 0;
+      slowFrames = 0;
+      slowWindows = 0;
+      warmup = Math.max(warmup, 30);
+      rafId = requestAnimationFrame(frame);
+    };
+    const stop = () => {
+      running = false;
+      cancelAnimationFrame(rafId);
+    };
 
-    // Start animation
-    animate();
+    // ── Events ──
+    const onVisibility = () => (document.hidden ? stop() : start());
 
-    // Cleanup
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      mouseActive = true;
+    };
+    const onMouseLeave = () => { mouseActive = false; };
+
+    let resizeRaf = 0;
+    const applySize = () => {
+      resizeRaf = 0;
+      const w = container.clientWidth || window.innerWidth;
+      const h = container.clientHeight || window.innerHeight;
+      if (w === width && h === height) return; // address-bar toggles don't change 100lvh
+      width = w;
+      height = h;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      if (reducedMotion) renderer.render(scene, camera);
+    };
+    const onResize = () => {
+      if (!resizeRaf) resizeRaf = requestAnimationFrame(applySize);
+    };
+
+    const onContextLost = (e: Event) => { e.preventDefault(); stop(); };
+    const onContextRestored = () => {
+      if (reducedMotion) renderer.render(scene, camera);
+      else start();
+    };
+
+    if (mouseEnabled && !reducedMotion) {
+      window.addEventListener('mousemove', onMouseMove, { passive: true });
+      document.documentElement.addEventListener('mouseleave', onMouseLeave);
+    }
+    window.addEventListener('resize', onResize, { passive: true });
+    document.addEventListener('visibilitychange', onVisibility);
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
+
+    if (reducedMotion) {
+      // Single static frame; no animation loop at all
+      step(1);
+      renderer.render(scene, camera);
+    } else if (!document.hidden) {
+      start();
+    }
+
     return () => {
+      stop();
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
       window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('resize', onWindowResize);
-      window.removeEventListener('resize', checkMobile);
-      
-      if (containerRef.current && renderer.domElement) {
-        containerRef.current.removeChild(renderer.domElement);
+      document.documentElement.removeEventListener('mouseleave', onMouseLeave);
+      window.removeEventListener('resize', onResize);
+      document.removeEventListener('visibilitychange', onVisibility);
+      renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
+      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
+
+      if (renderer.domElement.parentNode === container) {
+        container.removeChild(renderer.domElement);
       }
 
-      dotsRef.current.forEach(dot => {
-        dot.geometry.dispose();
-        dot.material.dispose();
-      });
-      
-      linesRef.current.forEach(connection => {
-        connection.line.geometry.dispose();
-      });
-      
-      if (lineMaterial) lineMaterial.dispose();
+      instancedMesh.dispose();
+      dotGeometry.dispose();
+      dotMaterial.dispose();
+      lineGeometry.dispose();
+      lineMaterial.dispose();
       renderer.dispose();
+      renderer.forceContextLoss();
     };
   }, []);
 
   return (
-    <div 
-      ref={containerRef} 
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        zIndex: -1,
-        background: '#000'
-      }}
+    <div
+      ref={containerRef}
+      aria-hidden="true"
+      className="webgl-bg"
+      style={{ zIndex: -1, background: '#000', overflow: 'hidden' }}
     />
   );
 };

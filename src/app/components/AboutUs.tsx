@@ -133,7 +133,7 @@ export default function AboutUs() {
             {/* Stats with animated counters */}
             <div className="grid grid-cols-2 gap-4 mt-8 text-center">
               <motion.div 
-                className="bg-black/40 border border-gray-800 rounded-lg p-6 backdrop-blur-none"
+                className="bg-black/60 md:bg-black/40 md:backdrop-blur-md border border-gray-800 rounded-lg p-6"
                 whileHover={{ y: -5, transition: { duration: 0.2 } }}
               >
                 <motion.p 
@@ -148,7 +148,7 @@ export default function AboutUs() {
               </motion.div>
               
               <motion.div 
-                className="bg-black/40 border border-gray-800 rounded-lg p-6 backdrop-blur-none"
+                className="bg-black/60 md:bg-black/40 md:backdrop-blur-md border border-gray-800 rounded-lg p-6"
                 whileHover={{ y: -5, transition: { duration: 0.2 } }}
               >
                 <motion.p 
@@ -212,7 +212,6 @@ export default function AboutUs() {
           initial={{ opacity: isMobile ? 1 : 0, y: isMobile ? 0 : 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: isMobile ? 0 : 0.3 }}
-          style={{ willChange: 'opacity, transform' }}
         >
           <div className="absolute -left-4 -top-4 w-16 h-16 border-l-2 border-t-2 border-[#eb6a1e]/40 rounded-tl-xl"></div>
           
@@ -225,7 +224,7 @@ export default function AboutUs() {
             <div id="services" className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-12">
               {/* Card 1 - Security */}
               <div 
-                className="bg-black/50 border border-gray-800 rounded-lg p-6 hover:border-[#eb6a1e]/50 transition-colors duration-300"
+                className="bg-black/60 md:bg-black/40 md:backdrop-blur-md border border-gray-800 rounded-lg p-6 hover:border-[#eb6a1e]/50 transition-colors duration-300"
                 style={{ opacity: 1, transform: 'none' }}
               >
                 <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-[#eb6a1e] to-orange-400 flex items-center justify-center mb-4">
@@ -263,7 +262,7 @@ export default function AboutUs() {
               
               {/* Card 2 - Development */}
               <div 
-                className="bg-black/50 border border-gray-800 rounded-lg p-6 hover:border-[#eb6a1e]/50 transition-colors duration-300"
+                className="bg-black/60 md:bg-black/40 md:backdrop-blur-md border border-gray-800 rounded-lg p-6 hover:border-[#eb6a1e]/50 transition-colors duration-300"
                 style={{ opacity: 1, transform: 'none' }}
               >
                 <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-[#eb6a1e] to-orange-400 flex items-center justify-center mb-4">
@@ -301,7 +300,7 @@ export default function AboutUs() {
               
               {/* Card 3 - Growth */}
               <div 
-                className="bg-black/50 border border-gray-800 rounded-lg p-6 hover:border-[#eb6a1e]/50 transition-colors duration-300"
+                className="bg-black/60 md:bg-black/40 md:backdrop-blur-md border border-gray-800 rounded-lg p-6 hover:border-[#eb6a1e]/50 transition-colors duration-300"
                 style={{ opacity: 1, transform: 'none' }}
               >
                 <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-[#eb6a1e] to-orange-400 flex items-center justify-center mb-4">
