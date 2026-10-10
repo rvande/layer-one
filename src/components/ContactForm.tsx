@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { CONTACT_EMAIL } from '@/lib/seo';
 
-type Status = 'idle' | 'sending' | 'sent' | 'error';
+type Status = 'idle' | 'sent';
 
 export const TOPICS = [
   'Network or firewall work',
@@ -20,49 +20,27 @@ function openMailClient(data: FormData) {
   window.location.href = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
+// For now the form hands the message to the visitor's own email app (mailto:).
+// /api/contact (SMTP) is still in the repo for when server-side sending is wired up.
 export function ContactForm() {
   const [status, setStatus] = useState<Status>('idle');
-  const [error, setError] = useState('');
 
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+  function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = e.currentTarget;
-    setStatus('sending');
-    setError('');
-    try {
-      const res = await fetch('/api/contact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.fromEntries(new FormData(form))),
-      });
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      if (res.status === 502 || res.status === 503) {
-        // Server can't deliver mail: fall back to the visitor's own mail app.
-        openMailClient(new FormData(form));
-        setError('Your email app should open with your message ready to send.');
-        setStatus('error');
-        return;
-      }
-      if (!res.ok) throw new Error(body.error ?? 'Something went wrong.');
-      form.reset();
-      setStatus('sent');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
-      setStatus('error');
-    }
-  }
-
-  if (status === 'sent') {
-    return (
-      <div className="form-done" role="status">
-        <h3>Message sent.</h3>
-        <p>Thanks. You&apos;ll hear back from Joseph directly, usually within one business day.</p>
-      </div>
-    );
+    const data = new FormData(e.currentTarget);
+    if (data.get('website')) return; // honeypot
+    openMailClient(data);
+    setStatus('sent');
   }
 
   return (
-    <form className="form" action="/api/contact" method="post" onSubmit={onSubmit}>
+    <form
+      className="form"
+      action={`mailto:${CONTACT_EMAIL}`}
+      method="post"
+      encType="text/plain"
+      onSubmit={onSubmit}
+    >
       <div>
         <label htmlFor="f-name">Name</label>
         <input id="f-name" name="name" autoComplete="name" required maxLength={120} />
@@ -89,12 +67,14 @@ export function ContactForm() {
       </div>
       <input className="hp" name="website" tabIndex={-1} autoComplete="off" aria-hidden="true" />
       <div>
-        <button className="btn" type="submit" disabled={status === 'sending'}>
-          {status === 'sending' ? 'Sending…' : 'Send message'}
+        <button className="btn" type="submit">
+          Send message
         </button>
       </div>
-      <p className="note" role={status === 'error' ? 'alert' : undefined}>
-        {status === 'error' ? error : "You'll get a reply from Joseph, not a sales team."}
+      <p className="note" role={status === 'sent' ? 'status' : undefined}>
+        {status === 'sent'
+          ? 'Your email app should open with your message ready to send. Just hit send there.'
+          : "You'll get a reply from Joseph, not a sales team."}
       </p>
     </form>
   );
