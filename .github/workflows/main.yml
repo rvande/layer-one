@@ -1,54 +1,41 @@
-name: Docker CI/CD
+name: Docker Hub
 
 on:
   push:
-    branches: [ dev, main ]
+    branches: [dev, main]
+
+env:
+  IMAGE: vande012/layer-one
 
 jobs:
-  build-and-deploy:
+  build-and-push:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
-
-      - name: Set environment variables
+      - name: Set image tag
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "DOCKER_TAG=prod" >> $GITHUB_ENV
-            echo "PORT=3002" >> $GITHUB_ENV
+            echo "DOCKER_TAG=prod" >> "$GITHUB_ENV"
           else
-            echo "DOCKER_TAG=dev" >> $GITHUB_ENV
-            echo "PORT=3001" >> $GITHUB_ENV
+            echo "DOCKER_TAG=dev" >> "$GITHUB_ENV"
           fi
 
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Build and push
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/Dockerfile.${{ env.DOCKER_TAG }}
+          file: Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/layer-one:${{ env.DOCKER_TAG }}
-            ghcr.io/${{ github.repository_owner }}/layer-one:${{ github.sha }}
-
-      - name: Deploy to Unraid
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.UNRAID_HOST }}
-          username: ${{ secrets.UNRAID_USERNAME }}
-          password: ${{ secrets.UNRAID_PASSWORD }}
-          port: ${{ secrets.UNRAID_PORT }}
-          script: |
-            docker pull ghcr.io/${{ github.repository_owner }}/layer-one:${{ env.DOCKER_TAG }}
-            docker stop layer-one-${{ env.DOCKER_TAG }} || true
-            docker rm layer-one-${{ env.DOCKER_TAG }} || true
-            docker run -d \
-              --name layer-one-${{ env.DOCKER_TAG }} \
-              -p ${{ env.PORT }}:${{ env.PORT }} \
-              -v /mnt/user/appdata/layer-one/${{ env.DOCKER_TAG }}:/app \
-              -e NODE_ENV=${{ env.DOCKER_TAG == 'prod' && 'production' || 'development' }} \
-              -e PORT=${{ env.PORT }} \
-              --restart unless-stopped \
-              ghcr.io/${{ github.repository_owner }}/layer-one:${{ env.DOCKER_TAG }}
+            ${{ env.IMAGE }}:${{ env.DOCKER_TAG }}
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
