@@ -1,65 +1,46 @@
-//@ts-nocheck
+import type { Metadata, Viewport } from 'next';
+import { IBM_Plex_Mono, Schibsted_Grotesk } from 'next/font/google';
+import { Footer } from '@/components/Footer';
+import { Header } from '@/components/Header';
+import { SITE_NAME, SITE_URL } from '@/lib/seo';
+import './globals.css';
 
-import type { Metadata } from "next";
-import { Geist, Geist_Mono, Roboto, Orbitron } from "next/font/google";
-import "./globals.css";
-
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const sans = Schibsted_Grotesk({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700', '800'],
+  variable: '--font-schibsted',
+  display: 'swap',
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-const roboto = Roboto({
-  variable: "--font-roboto",
-  subsets: ["latin"],
-  weight: ["300", "400", "700"],
-});
-
-const orbitron = Orbitron({
-  variable: "--font-orbitron",
-  subsets: ["latin"],
+const mono = IBM_Plex_Mono({
+  subsets: ['latin'],
+  weight: ['400', '500'],
+  variable: '--font-plex-mono',
+  display: 'swap',
 });
 
 export const metadata: Metadata = {
-  title: "Layer One IT Consultants",
-  description: "Solutions for the modern world",
-  metadataBase: new URL(
-    process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : process.env.NEXT_PUBLIC_SITE_URL || "https://layeroneconsultants.com"
-  ),
-  openGraph: {
-    images: [
-      {
-        url: "/OG-Image.png",
-        alt: "Layer One IT Consultants",
-      },
-    ],
-  },
-  verification: {
-    google: "538459a7aedf6cef",
-  },
+  metadataBase: new URL(SITE_URL),
+  applicationName: SITE_NAME,
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#FFFFFF',
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="scroll-smooth">
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-        {/* Add any additional meta tags here */}
-      </head>
-      <body className={`${roboto.className} ${orbitron.variable} ${geistSans.variable} ${geistMono.variable} bg-black text-white overflow-x-hidden`}>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
+      <body>
+        <a className="skip" href="#main">
+          Skip to content
+        </a>
+        <Header />
         {children}
+        <Footer />
       </body>
     </html>
   );

@@ -1,13 +1,9 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  env: {
-    NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL || "https://layeroneconsultants.com",
-  },
-  images: {
-    domains: ['layeroneconsultants.com', 'localhost'],
-  },
+  // Self-contained server bundle for the Docker image.
+  output: 'standalone',
+  poweredByHeader: false,
 };
 
 export default nextConfig;

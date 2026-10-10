@@ -1,0 +1,13 @@
+# For the on-prem server: pulls the prebuilt image, no source needed.
+# Put runtime secrets in a .env file next to this one (never in the image).
+services:
+  web:
+    image: ${IMAGE:-YOUR_DOCKERHUB_USER/layerone-site:latest}
+    container_name: layerone-site
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
