@@ -1,0 +1,17 @@
+# Layer One IT Consultants
+
+> Layer One IT Consultants LLC is an IT consultancy in Hartland, Wisconsin. We design secure business networks and firewalls, build custom software and apps, and provide AI automation, backups and IT advisory for small and mid-sized businesses in Waukesha County, Milwaukee, Lake Country and the Chicago area.
+
+Contact: contact@layeroneconsultants.com
+
+## Pages
+
+- [Home](https://layeroneconsultants.com/): Overview of Layer One, services and how to book a free consultation.
+- [Services](https://layeroneconsultants.com/services): Network and firewall design, custom software and apps, AI automation, backups and IT advisory.
+- [Network & Firewall Services, Waukesha County WI](https://layeroneconsultants.com/services/network-security-waukesha-county): Business firewall, switching, Wi-Fi and VPN design and installation (Fortinet, Cisco, Palo Alto) in Hartland, Pewaukee, Oconomowoc, Waukesha and Milwaukee.
+- [Work](https://layeroneconsultants.com/work): Apps, tools and platforms we have built, including the Tag, You're It app, a free Cisco config generator, Free Family Display, Safeguard, Forever Faded and Pyxis.
+- [Joseph J. Henderson, Principal Engineer](https://layeroneconsultants.com/about/joseph-henderson): Co-Founder and Principal Engineer of Layer One.
+
+## Optional
+
+- [Sitemap](https://layeroneconsultants.com/sitemap.xml)
