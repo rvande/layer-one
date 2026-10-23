@@ -2,7 +2,7 @@
 # Put runtime secrets in a .env file next to this one (never in the image).
 services:
   web:
-    image: ${IMAGE:-YOUR_DOCKERHUB_USER/layerone-site:latest}
+    image: ${IMAGE:-vande012/layer-one:prod}
     container_name: layerone-site
     ports:
       - "${PORT:-3000}:3000"
